@@ -1,33 +1,32 @@
 <template>
   <div class="flex flex-col h-full bg-[#1e1e1e] rounded-lg overflow-hidden border border-[#333]">
-    <div class="drag-handle flex items-center justify-between px-3 py-2 bg-[#252525] border-b border-[#333] cursor-move select-none" draggable="false">
+    <!-- Drag Handle / Title -->
+    <div class="drag-handle flex items-center justify-between px-3 py-1.5 bg-[#252525] border-b border-[#333] cursor-move select-none" draggable="false">
       <div class="flex items-center gap-2">
         <div class="w-2 h-2 rounded-full" :style="{ backgroundColor: color }"></div>
-        <span class="text-xs font-bold text-[#d4d4d4]">{{ name }}</span>
+        <span class="text-[10px] font-bold text-[#d4d4d4] uppercase tracking-wider">{{ name }}</span>
       </div>
-      <div class="flex items-center gap-3">
-        <button @click="showHistory = true" class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
+    </div>
+
+    <!-- Terminal Area -->
+    <div ref="terminalElement" class="flex-1 overflow-hidden p-2"></div>
+
+    <!-- Bottom Toolbar -->
+    <div class="flex items-center justify-between px-3 py-1.5 bg-[#181818] border-t border-[#333]">
+      <div class="flex items-center gap-4">
+        <button @click="showHistory = true" class="text-[10px] text-gray-500 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
           <History :size="12" /> 历史命令
         </button>
-        <button @click="clearTerminal" class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
+        <button @click="clearTerminal" class="text-[10px] text-gray-500 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
           <Trash2 :size="12" /> 清空
         </button>
-        <button class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
+        <button class="text-[10px] text-gray-500 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
           <Settings :size="12" /> 设置
         </button>
       </div>
-    </div>
-    <div ref="terminalElement" class="flex-1 overflow-hidden p-2"></div>
-    <div class="p-2 bg-[#1e1e1e] border-t border-[#333] flex items-center gap-2">
-      <span class="text-[#4ade80] text-sm font-mono">{{ name.toLowerCase() }}$</span>
-      <input
-        v-model="inputCommand"
-        @keyup.enter="handleCommand"
-        @keydown.up="prevHistory"
-        @keydown.down="nextHistory"
-        class="flex-1 bg-transparent border-none outline-none text-sm font-mono text-[#d4d4d4]"
-        placeholder="输入命令..."
-      />
+      <div class="text-[10px] font-mono text-gray-600">
+        {{ currentInput.length > 0 ? 'TYPING...' : 'READY' }}
+      </div>
     </div>
 
     <!-- History Popup -->
@@ -67,7 +66,6 @@ const props = defineProps<{
 }>();
 
 const terminalElement = ref<HTMLElement | null>(null);
-const inputCommand = ref("");
 const showHistory = ref(false);
 const terminalStore = useTerminalStore();
 
@@ -76,20 +74,22 @@ let fitAddon: FitAddon;
 let unlisten: () => void;
 
 const history = ref<string[]>([]);
-const historyIndex = ref(-1);
+const currentInput = ref("");
 
 onMounted(async () => {
-  console.log("Terminal mounted:", props.id);
-  
+  const config = terminalStore.terminals.find(t => t.id === props.id);
+
   term = new Terminal({
     theme: {
       background: "#1e1e1e",
       foreground: "#d4d4d4",
       cursor: "#d4d4d4",
+      selectionBackground: "#333",
     },
     fontFamily: "JetBrains Mono, Fira Code, monospace",
     fontSize: 13,
     convertEol: true,
+    cursorBlink: true,
   });
 
   fitAddon = new FitAddon();
@@ -100,80 +100,95 @@ onMounted(async () => {
     fitAddon.fit();
   }
 
-  // Check if running in Tauri
-  const isTauri = !!(window as any).__TAURI_INTERNALS__;
-  console.log("Is Tauri environment:", isTauri);
+  // Handle direct data input
+  term.onData(async (data) => {
+    const isTauri = !!(window as any).__TAURI_INTERNALS__;
+    if (!isTauri) return;
 
+    for (let i = 0; i < data.length; i++) {
+      const char = data[i];
+      if (char === "\r") { // Enter
+        const cmd = currentInput.value;
+        term.write("\r\n");
+        if (cmd.trim()) {
+          await sendCommand(cmd);
+          terminalStore.addHistory(props.id, cmd);
+          history.value = terminalStore.terminals.find(t => t.id === props.id)?.history || [];
+        } else {
+            await sendCommand("");
+        }
+        currentInput.value = "";
+      } else if (char === "\x7f") { // Backspace
+        if (currentInput.value.length > 0) {
+          currentInput.value = currentInput.value.slice(0, -1);
+          term.write("\b \b");
+        }
+      } else if (char === "\x03") { // Ctrl+C
+        term.write("^C\r\n");
+        currentInput.value = "";
+      } else {
+        const code = char.charCodeAt(0);
+        if (code >= 32 && code <= 126) {
+          currentInput.value += char;
+          term.write(char);
+        }
+      }
+    }
+  });
+
+  const isTauri = !!(window as any).__TAURI_INTERNALS__;
   if (isTauri) {
-    try {
-      unlisten = await listen(`term-out-${props.id}`, (event) => {
-        term.write(event.payload as string);
-      });
-      console.log(`Listening for term-out-${props.id}`);
-    } catch (e) {
-      console.error("Failed to setup Tauri listener:", e);
-      term.write(`\r\n\x1b[31mError: Failed to setup Tauri listener. ${e}\x1b[0m\r\n`);
+    unlisten = await listen(`term-out-${props.id}`, (event) => {
+      term.write(event.payload as string);
+    });
+
+    if (config?.startupCommand) {
+      term.write(`\x1b[34m[CliStack] Starting ${props.name} via "${config.startupCommand}"...\x1b[0m\r\n`);
+      await sendCommand(config.startupCommand);
+    } else {
+      term.write(`\r\n\x1b[32m${props.name.toLowerCase()}$\x1b[0m `);
     }
   } else {
-    term.write("\r\n\x1b[33mWarning: Running in browser mode. CLI execution is disabled.\x1b[0m\r\n");
+    term.write("\r\n\x1b[33m[CliStack] Warning: Running in browser mode. CLI disabled.\x1b[0m\r\n");
+    term.write(`\x1b[32m${props.name.toLowerCase()}$\x1b[0m `);
   }
 
   window.addEventListener("resize", () => fitAddon.fit());
-
-  // Load history from store
-  const t = terminalStore.terminals.find((p) => p.id === props.id);
-  if (t) history.value = t.history;
+  if (config) history.value = config.history;
 });
+
+const sendCommand = async (cmd: string) => {
+  const config = terminalStore.terminals.find(t => t.id === props.id);
+  try {
+    await invoke("run_command", { 
+      id: props.id, 
+      command: cmd,
+      cwd: config?.cwd,
+      env: config?.env
+    });
+  } catch (e) {
+    term.write(`\r\n\x1b[31mError: ${e}\x1b[0m\r\n`);
+  }
+};
+
+const clearTerminal = () => {
+  term.clear();
+  term.write(`\r\x1b[32m${props.name.toLowerCase()}$\x1b[0m `);
+};
+
+const selectHistory = (cmd: string) => {
+  for (let i = 0; i < currentInput.value.length; i++) {
+    term.write("\b \b");
+  }
+  currentInput.value = cmd;
+  term.write(cmd);
+  showHistory.value = false;
+};
 
 onBeforeUnmount(() => {
   if (unlisten) unlisten();
   window.removeEventListener("resize", () => fitAddon.fit());
 });
-
-const handleCommand = async () => {
-  const cmd = inputCommand.value.trim();
-  if (!cmd) return;
-
-  term.write(`\r\n\x1b[32m${props.name.toLowerCase()}$\x1b[0m ${cmd}\r\n`);
-  
-  try {
-    await invoke("run_command", { id: props.id, command: cmd });
-    terminalStore.addHistory(props.id, cmd);
-    history.value = terminalStore.terminals.find(t => t.id === props.id)?.history || [];
-  } catch (e) {
-    term.write(`\r\n\x1b[31mError: ${e}\x1b[0m\r\n`);
-  }
-
-  inputCommand.value = "";
-  historyIndex.value = -1;
-};
-
-const clearTerminal = () => {
-  term.clear();
-};
-
-const selectHistory = (cmd: string) => {
-  inputCommand.value = cmd;
-  showHistory.value = false;
-};
-
-const prevHistory = () => {
-  if (history.value.length === 0) return;
-  if (historyIndex.value < history.value.length - 1) {
-    historyIndex.value++;
-    inputCommand.value = history.value[historyIndex.value];
-  }
-};
-
-const nextHistory = () => {
-  if (historyIndex.value > 0) {
-    historyIndex.value--;
-    inputCommand.value = history.value[historyIndex.value];
-  } else if (historyIndex.value === 0) {
-    historyIndex.value = -1;
-    inputCommand.value = "";
-  }
-};
 </script>
 
 <style scoped>
