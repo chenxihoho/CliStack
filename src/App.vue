@@ -45,35 +45,52 @@
         </div>
 
         <!-- One-Main-Three-Sub Layout -->
-        <div v-else-if="terminalStore.activeLayout === 'one-main-three-sub'" class="h-full flex flex-col gap-4">
-          <div class="flex-[2] min-h-0">
-            <Terminal 
-              :id="activeTerminal.id" 
-              :name="activeTerminal.name" 
-              :color="activeTerminal.color" 
-            />
-          </div>
-          <div class="flex-1 min-h-0 grid grid-cols-3 gap-4">
-            <Terminal 
-              v-for="term in otherTerminals" 
-              :key="term.id" 
-              :id="term.id" 
-              :name="term.name" 
-              :color="term.color" 
-            />
-          </div>
-        </div>
+        <draggable 
+          v-else-if="terminalStore.activeLayout === 'one-main-three-sub'" 
+          v-model="draggableTerminals"
+          item-key="id"
+          handle=".drag-handle"
+          tag="div"
+          :animation="200"
+          :force-fallback="true"
+          :swap-threshold="0.6"
+          :invert-swap="true"
+          ghost-class="opacity-50"
+          class="h-full grid grid-cols-3 grid-rows-[2fr_1fr] gap-4"
+        >
+          <template #item="{ element, index }">
+            <div :class="index === 0 ? 'col-span-3 row-span-1 min-h-0' : 'col-span-1 row-span-1 min-h-0'">
+              <Terminal 
+                :id="element.id" 
+                :name="element.name" 
+                :color="element.color" 
+              />
+            </div>
+          </template>
+        </draggable>
 
         <!-- Four-Grid Layout -->
-        <div v-else-if="terminalStore.activeLayout === 'four-grid'" class="h-full grid grid-cols-2 grid-rows-2 gap-4">
-          <Terminal 
-            v-for="term in terminalStore.terminals" 
-            :key="term.id" 
-            :id="term.id" 
-            :name="term.name" 
-            :color="term.color" 
-          />
-        </div>
+        <draggable 
+          v-else-if="terminalStore.activeLayout === 'four-grid'" 
+          v-model="draggableTerminals"
+          item-key="id"
+          handle=".drag-handle"
+          tag="div"
+          :animation="200"
+          :force-fallback="true"
+          ghost-class="opacity-50"
+          class="h-full grid grid-cols-2 grid-rows-2 gap-4"
+        >
+          <template #item="{ element }">
+            <div class="h-full">
+              <Terminal 
+                :id="element.id" 
+                :name="element.name" 
+                :color="element.color" 
+              />
+            </div>
+          </template>
+        </draggable>
       </main>
 
       <!-- Bottom Status Bar -->
@@ -108,6 +125,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount } from "vue";
 import { Plus, X, List, LayoutGrid, Columns, Maximize2, MoreHorizontal } from "lucide-vue-next";
+import draggable from "vuedraggable";
 import Sidebar from "./components/Sidebar.vue";
 import Terminal from "./components/Terminal.vue";
 import { useTerminalStore } from "./store/useTerminalStore";
@@ -118,8 +136,19 @@ const activeTerminal = computed(() => {
   return terminalStore.terminals.find(t => t.id === terminalStore.activeTabId) || terminalStore.terminals[0];
 });
 
-const otherTerminals = computed(() => {
-  return terminalStore.terminals.filter(t => t.id !== terminalStore.activeTabId);
+// Computed list for draggable components
+const draggableTerminals = computed({
+  get: () => terminalStore.terminals,
+  set: (value) => terminalStore.updateTerminalOrder(value)
+});
+
+// Sub-terminals for one-main-three-sub layout (all except the first one)
+const subTerminals = computed({
+  get: () => terminalStore.terminals.slice(1),
+  set: (value) => {
+    const newOrder = [terminalStore.terminals[0], ...value];
+    terminalStore.updateTerminalOrder(newOrder);
+  }
 });
 
 const getShortcut = (id: string) => {

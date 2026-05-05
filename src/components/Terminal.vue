@@ -1,18 +1,18 @@
 <template>
   <div class="flex flex-col h-full bg-[#1e1e1e] rounded-lg overflow-hidden border border-[#333]">
-    <div class="flex items-center justify-between px-3 py-2 bg-[#252525] border-b border-[#333]">
+    <div class="drag-handle flex items-center justify-between px-3 py-2 bg-[#252525] border-b border-[#333] cursor-move select-none" draggable="false">
       <div class="flex items-center gap-2">
         <div class="w-2 h-2 rounded-full" :style="{ backgroundColor: color }"></div>
         <span class="text-xs font-bold text-[#d4d4d4]">{{ name }}</span>
       </div>
       <div class="flex items-center gap-3">
-        <button @click="showHistory = true" class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors">
+        <button @click="showHistory = true" class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
           <History :size="12" /> 历史命令
         </button>
-        <button @click="clearTerminal" class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors">
+        <button @click="clearTerminal" class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
           <Trash2 :size="12" /> 清空
         </button>
-        <button class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors">
+        <button class="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors outline-none transform-none">
           <Settings :size="12" /> 设置
         </button>
       </div>
